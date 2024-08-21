@@ -1,0 +1,11 @@
+do movi 1 00000 0
+do movi 2 00000 1
+do movi 3 00000 5
+do add 4 1 2
+do mov 5 1 0
+do mov 1 2 0
+do mov 2 4 0
+do subi 3 3 1
+do andis 3 16 0
+eq br_ 2
+do br_ -7
