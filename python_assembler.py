@@ -1,351 +1,214 @@
-# {instruction}_{support}_{condition}: r{rd_addr} = r{rh_addr}, (r{ro_addr} or {imm_value}) 
-# {branch}_{condition}: {imm_value}
+# python_assembler.py
 
+# Dicionários de mapeamento da arquitetura do processador
 instructions = {
-    # 3 variables
-    'add': ['00', '0000'],
-    'sub': ['00', '0001'],
-    'mul': ['00', '0010'],
-    'div': ['00', '0011'],
-    'and': ['00', '0100'],
-    'or':  ['00', '0101'],
-    'xor': ['00', '0110'],
-    'not': ['00', '0111'],
-    'mov': ['00', '1000'],
-    'teq': ['00', '0001'],
-    'cmp': ['00', '0001'],
-    
-    # 2 variables
-    'load': ['01', '0001'],
-    'store': ['01', '0000'],
-    
-    # 1 variable
-    'b': ['11', '0000'],
-    'bl': ['11', '1000'],
-    
-    # 0 variable
-    'l': ['11', '0100'],
-    'll': ['11', '1100']  # Link and save current position
+    'add': ['00', '0000'], 'sub': ['00', '0001'], 'mul': ['00', '0010'],
+    'div': ['00', '0011'], 'and': ['00', '0100'], 'or':  ['00', '0101'],
+    'xor': ['00', '0110'], 'not': ['00', '0111'], 'mov': ['00', '1000'],
+    'in':  ['00', '1001'],
+    'load': ['01', '0001'], 'store': ['01', '0000'],
+    'b': ['11', '0000'], 'bl': ['11', '1000'],
+    'l': ['11', '0100'], 'll': ['11', '1100']
 }
 
 condition_setting = {
-    'do':   '0000',
-    'eq':   '0001',
-    'neq':  '0010',
-    'gt':   '0011',
-    'gteq': '0100',
-    'lt':   '0101',
-    'lteq': '0110'
+    'do': '0000', 'eq': '0001', 'neq': '0010', 'gt': '0011',
+    'gteq': '0100', 'lt': '0101', 'lteq': '0110'
 }
 
 support_bits = {
-    'i':    '10',
-    's':    '01',
-    'is':   '11',
-    'si':   '11',
-    'na':   '00'
+    'i': '10', 's': '01', 'is': '11', 'si': '11', 'na': '00'
 }
 
 class Instruction:
-
-    binary32_line: str
-    assembly_line: str
-    
-    condition: str
-    opCode: str
-    branchValue: str
-    destinyRegister: str
-    hitRegister: str
-    immediateValue: str = 0
-    operandRegister: str
-    supportBits: str = 'na'
-    
-    disassembler_response: str = '-> Success'
-    decoder_response: str = '-> Success'
-    response: str = '-> Success'
-
+    """
+    Representa e processa uma única linha de código assembly.
+    """
     def __init__(self, assembly_single_line: str):
-        
-        self.disassembler_response = '-> Success'
-        self.decoder_response = '-> Success'
+        # 1. Inicializa todos os atributos com valores padrão para evitar erros
+        self.assembly_line = assembly_single_line.strip()
+        self.binary32_line = ""
+        self.debug_line = ""
+        self.condition = "do"
+        self.opCode = ""
+        self.supportBits = "na"
+        self.destinyRegister = ""
+        self.hitRegister = ""
+        self.operandRegister = ""
+        self.immediateValue = "0"
         self.response = '-> Success'
-        
-        self.assembly_line = assembly_single_line
-        self.disassembler_response = self.disassemble(self.assembly_line)
-        if 'Error' in str(self.disassembler_response):
-            self.response = self.disassembler_response
-        else:
-            self.decoder_response = self.decode_assembly(self.assembly_line)
-            if 'Error' in self.decoder_response:
-                self.response = self.decoder_response
-    
-    def decode_assembly(self, assembly_line: str) -> str:
-        self.binary32_line = condition_setting[self.condition] # 4
-        self.binary32_line += instructions[self.opCode][0] # 2
-        self.binary32_line += support_bits[self.supportBits] # 2
-        self.binary32_line += instructions[self.opCode][1] # 4, = 12
-        
-        if self.opCode == 'l' or  self.opCode == 'll':
-            if self.supportBits != 'na':
-                return '-> Error: Syntax (Link cannot use immediate or set CPSR flags)'
-            self.binary32_line += format(0, '020b') # 20, = 32
-            return '-> Success'
+
+        if not self.assembly_line:
+            self.response = '-> Skipped: Empty line'
+            return
+
+        # 2. O 'disassemble' preenche os atributos ou define self.response em caso de erro
+        self.disassemble(self.assembly_line)
+
+        # 3. Se não houver erros no 'disassemble', prossegue para o 'decode'
+        if 'Error' not in self.response:
+            self.decode_assembly()
+
+    def disassemble(self, line: str):
+        """
+        Analisa a linha de assembly e preenche os atributos da classe.
+        Não retorna valores, apenas modifica o estado do objeto.
+        """
+        try:
+            op_part, rest_part = line.split(':', 1)
+            rest_part = rest_part.strip()
+        except ValueError:
+            self.response = '-> Error: Syntax (missing ":" separator)'
+            return
+
+        self.get_op_cond_support(op_part)
+        if 'Error' in self.response:
+            return
+
+        if self.opCode in ('l', 'll'):
+            return
+
+        if self.opCode == 'in':
+            self.destinyRegister = rest_part
+            return
+
+        if self.opCode in ('b', 'bl'):
+            if 'i' in self.supportBits:
+                self.immediateValue = rest_part
+            else:
+                self.operandRegister = rest_part
+            return
+
+        try:
+            dest_part, source_part = rest_part.split('=', 1)
+            self.destinyRegister = dest_part.strip()
+
+            if ',' not in source_part:
+                if 'i' in self.supportBits:
+                    self.immediateValue = source_part.strip()
+                else:
+                    self.hitRegister = source_part.strip()
+                return
+
+            source_parts = [p.strip() for p in source_part.split(',')]
+            self.hitRegister = source_parts[0]
+            if len(source_parts) > 1:
+                if 'i' in self.supportBits:
+                    self.immediateValue = source_parts[1]
+                else:
+                    self.operandRegister = source_parts[1]
+        except (ValueError, IndexError):
+            self.response = f"-> Error: Malformed operands for instruction '{self.opCode}'"
+
+    def decode_assembly(self):
+        """
+        Codifica os atributos para a representação binária de 32 bits e
+        cria uma linha de depuração paralela.
+        """
+        try:
+            cond_bits = condition_setting.get(self.condition, '0000')
+            type_code, op_code_val = instructions.get(self.opCode, ["", ""])
+            support = support_bits.get(self.supportBits, '00')
             
-        if self.opCode == 'b' or self.opCode == 'bl':
-            if 's' in self.supportBits:
-                return '-> Error: Syntax (Branch cannot set CPSR flags)'
-            self.binary32_line += format(0, '010b') # 10, = 22
+            self.binary32_line = cond_bits + type_code + support + op_code_val
+            self.debug_line = f"cond[{cond_bits}] type[{type_code}] sup[{support}] op[{op_code_val}] "
+
+            if self.opCode in ('b', 'bl'):
+                self.binary32_line += format(0, '010b')
+                self.debug_line += "n/a[00000] n/a[00000] "
+                if 'i' in self.supportBits:
+                    imm_bits = self.getSignedBinary(self.immediateValue, 10)
+                    self.binary32_line += imm_bits
+                    self.debug_line += f"imm[{imm_bits}]"
+                else:
+                    reg_bits = format(int(self.operandRegister[1:]), '05b')
+                    self.binary32_line += reg_bits + '00000'
+                    self.debug_line += f"reg[{reg_bits}] pad[00000]"
+                return
+
+            if self.opCode in ('l', 'll'):
+                self.binary32_line += format(0, '020b')
+                self.debug_line += "n/a[00000000000000000000]"
+                return
+
+            rd_bits = format(int(self.destinyRegister[1:]), '05b') if self.destinyRegister and 'r' in self.destinyRegister else '00000'
+            self.binary32_line += rd_bits
+            self.debug_line += f"Rd[{rd_bits}] "
+
+            if self.opCode == 'in':
+                self.binary32_line += format(0, '015b')
+                self.debug_line += "n/a[000000000000000]"
+                return
+
+            rh_bits = format(int(self.hitRegister[1:]), '05b') if self.hitRegister and 'r' in self.hitRegister else '00000'
+            self.binary32_line += rh_bits
+            self.debug_line += f"Rh[{rh_bits}] "
+
             if 'i' in self.supportBits:
-                self.binary32_line += self.getSignedBinary(self.immediateValue) # 10, = 32
-                return '-> Success'
+                imm_bits = self.getSignedBinary(self.immediateValue, 10)
+                self.binary32_line += imm_bits
+                self.debug_line += f"imm[{imm_bits}]"
             else:
-                self.binary32_line += format(int(self.operandRegister[1:]), '05b') # 5, = 27
-                self.binary32_line += format(0, '05b') # 5, = 32
-                return '-> Success'
-        
-        if 'r' not in self.destinyRegister:
-            return '-> Error: Syntax (registers must have "r" before address value)'
-        self.binary32_line += format(int(self.destinyRegister[1:]), '05b') # 5, = 17
-        
-        if self.opCode == 'mov':
-            if 's' in self.supportBits:
-                return '-> Error: Syntax (Move cannot set CPSR flags)'
-            if 'i' in self.supportBits:
-                self.binary32_line += '00000' # 5, = 22
-                self.binary32_line += self.getSignedBinary(self.immediateValue) # 10, 32
-                return '-> Success'
-            self.binary32_line += format(int(self.hitRegister[1:]), '05b') # 5, = 22
-            self.binary32_line += format(0, '010b') # 10, = 32
-            return '-> Success'
-        
-        if 'r' not in self.hitRegister:
-            return '-> Error: Syntax (registers must have "r" before address value)' # 5, = 17
-        self.binary32_line += format(int(self.hitRegister[1:]), '05b') # 5, = 22
-        if self.opCode == 'load' or self.opCode == 'store':
-            if 's' in self.condition:
-                return '-> Error: Syntax (Load / Store cannot set CPSR flags)'
-            if 'i' not in self.condition:
-                if 'r' not in self.operandRegister:
-                    return '-> Error: Syntax (registers must have "r" before address value)'
-                self.binary32_line += format(int(self.operandRegister[1:]), '05b') # 5, = 27
-                self.binary32_line += format(0, '05b') # 5, = 32
-                return '-> Success'
-            self.binary32_line += self.getSignedBinary(self.immediateValue) # 10, = 32
-            return '-> Success'
-        
-        if self.opCode in instructions.keys() and self.opCode != 'mov':
-            if 'i' in self.supportBits:
-                self.binary32_line += self.getSignedBinary(self.immediateValue) # 10, = 32
-                return '-> Success'
-            if 'r' not in self.operandRegister:
-                return '-> Error: Syntax (registers must have "r" before address value)'
-            self.binary32_line += format(int(self.operandRegister[1:]), '05b') # 5, = 27
-            self.binary32_line += format(0, '05b') # 5, = 32
-            return '-> Success'
-    
-    def getSignedBinary(self, immediateValue: str) -> str:
-        if int(immediateValue) >= 0:
-            return format(int(immediateValue), '010b')
-        return '1'+format(1+(not (-int(immediateValue))), '010b')[1:]
-    
-    def disassemble(self, assembly_line: str) -> str:
-        self.disassembler_response = self.getOpCode(assembly_line)
-        if 'Error' in self.disassembler_response:
-            return self.disassembler_response
-        
-        if self.opCode == 'l' or  self.opCode == 'll':
-            return 'Success'
-        
-        if self.opCode == 'b' or self.opCode == 'bl':
-            self.disassembler_response = self.getBranchValue(assembly_line)
-            return self.disassembler_response
-        
-        if self.opCode == 'load' or self.opCode == 'store':
-            self.disassembler_response = self.getLoadStoreRegisters(assembly_line)
-            return self.disassembler_response
-        
-        if self.opCode == 'mov':
-            self.disassembler_response = self.getMoveRegisters(assembly_line)
-            return self.disassembler_response
-        
-        if (
-                self.opCode == 'add'
-                or self.opCode == 'sub'
-                or self.opCode == 'mul'
-                or self.opCode == 'div'
-                or self.opCode == 'and'
-                or self.opCode == 'or'
-                or self.opCode == 'xor'
-                or self.opCode == 'not'
-                or self.opCode == 'teq'
-                or self.opCode == 'cmp'
-            ):
-            self.disassembler_response = self.getDataProcessingRegisters(assembly_line)
-            return self.disassembler_response
-        
-        return '-> Error: invalid OpCode'
-    
-    def getOpCode(self, assembly_line: str) -> str:
-        for c_index, char in enumerate(assembly_line):
-            if char == ':':
-                self.opCode = assembly_line[:c_index].strip()
-                self.disassembler_response = self.getCondition(self.opCode)
-                if 'Error' in self.disassembler_response:
-                    return self.disassembler_response
-                return '-> Success'
-        return '-> Error: Syntax (lacking ":")'
-    
-    def getCondition(self, fullOpCode: str) -> str:
-        if fullOpCode[-2:] == 'eq':
-            if fullOpCode[-4:-2] == 'gt' or fullOpCode[-4:-2] == 'lt':
-                self.condition = fullOpCode[-4:]
-                self.opCode = fullOpCode[:-4]
-            elif fullOpCode[-3] == 'n':
-                self.condition = fullOpCode[-3:]
-                self.opCode = fullOpCode[:-3]
-            else:
-                self.condition = fullOpCode[-2:]
-                self.opCode = fullOpCode[:-2]
-        
-        elif fullOpCode[-2:] == 'gt' or fullOpCode[-2:] == 'lt':
-            self.condition = fullOpCode[-2:]
-            self.opCode = fullOpCode[:-2]
-        
+                ro_bits = format(int(self.operandRegister[1:]), '05b') if self.operandRegister and 'r' in self.operandRegister else '00000'
+                self.binary32_line += ro_bits + '00000'
+                self.debug_line += f"Ro[{ro_bits}] pad[00000]"
+
+        except Exception as e:
+            self.response = f"-> Error: An unexpected error occurred during decoding: {e}"
+
+    def get_op_cond_support(self, op_part: str):
+        temp_op = op_part
+        conditions = ['gteq', 'lteq', 'neq', 'eq', 'gt', 'lt']
+        for cond in conditions:
+            if temp_op.endswith(cond):
+                self.condition = cond
+                temp_op = temp_op[:-len(cond)]
+                break
         else:
             self.condition = 'do'
-        
-        self.disassembler_response = self.getSupportBits(self.opCode)
-        if 'Error' in self.disassembler_response:
-            return self.disassembler_response
-        
-        if self.opCode not in instructions.keys():
-            return '-> Error: Syntax (invalid OpCode)'
-        
-        return '-> Success'
-    
-    def getSupportBits(self, opCodeWithBits: str):
-        if opCodeWithBits[-1] == 's' or opCodeWithBits[-1] == 'i':
-            if opCodeWithBits[-2] == 's' or opCodeWithBits[-2] == 'i':
-                self.supportBits = opCodeWithBits[-2:]
-                self.opCode = opCodeWithBits[:-2]
-                return '-> Success'
-            self.supportBits = opCodeWithBits[-1]
-            self.opCode = opCodeWithBits[:-1]
-            return '-> Success'
-        
-        self.supportBits = 'na'
-        return '-> Success'
-    
-    def getMoveRegisters(self, assembly_line: str) -> str:
-        # Only 2 registers
-        # Only Rd and Rh
-        self.disassembler_response = self.getDestinyRegister(assembly_line)
-        if 'Error' in self.disassembler_response:
-            return self.disassembler_response
-        
-        self.disassembler_response = self.getMoveHitRegister(assembly_line)
-        if 'Error' in self.disassembler_response:
-            return self.disassembler_response
-        
-        return '-> Success'
-    
-    def getMoveHitRegister(self, assembly_line: str) -> str:
-        for c_index, char in enumerate(assembly_line):
-            if char == '=':
-                self.hitRegister = assembly_line[c_index+1:].strip()
-                return '-> Success'
-        return '-> Error: Syntax (invalid Rh)'
-    
-    def getBranchValue(self, assembly_line: str) -> str:
-        for c_index, char in enumerate(assembly_line):
-            if char == ':':
-                if 'i' in self.supportBits:
-                    self.immediateValue = assembly_line[c_index+1:].strip()
-                    return '-> Success'
-                else:
-                    self.operandRegister = assembly_line[c_index+1:].strip()
-                    return '-> Success'
-        return '-> Error: Syntax (invalid branch offset value)'
-    
-    def getLoadStoreRegisters(self, assembly_line: str) -> str:
-        self.disassembler_response = self.getDestinyRegister(assembly_line)
-        if 'Error' in self.disassembler_response:
-            return self.disassembler_response
-        
-        self.disassembler_response = self.getHitRegister(assembly_line)
-        if 'Error' in self.disassembler_response:
-            return self.disassembler_response
-    
-    def getDataProcessingRegisters(self, assembly_line: str) -> str:
-        self.disassembler_response = self.getDestinyRegister(assembly_line)
-        if 'Error' in self.disassembler_response:
-            return self.disassembler_response
-        
-        self.disassembler_response = self.getHitRegister(assembly_line)
-        if 'Error' in self.disassembler_response:
-            return self.disassembler_response
-        
-        self.disassembler_response = self.getOperand2(assembly_line)
-        if 'Error' in self.disassembler_response:
-            return self.disassembler_response
-    
-    def getDestinyRegister(self, assembly_line: str) -> str:
-        for c_index, char in enumerate(assembly_line):
-            if char == ':':
-                opCode_end = c_index
-            elif char == '=':
-                self.destinyRegister = assembly_line[opCode_end+1:c_index-1].strip()
-                return '-> Success'
-        return '-> Error: Syntax (invalid Rd)'
-    
-    def getHitRegister(self, assembly_line: str) -> str:
-        for c_index, char in enumerate(assembly_line):
-            if char == '=':
-                rd_end = c_index
-            elif char == ',':
-                self.hitRegister = assembly_line[rd_end+1:c_index].strip()
-                return '-> Success'
-        return '-> Error: Syntax (invalid Rh)'
-    
-    def getOperand2(self, assembly_line: str) -> str:
-        for c_index, char in enumerate(assembly_line):
-            if char == ',':
-                operand = assembly_line[c_index+1:].strip()
-                if 'i' in self.supportBits:
-                    self.immediateValue = operand
-                else:
-                    self.operandRegister = operand
-                return '-> Success'
-        return '-> Error: Syntax (invalid Ro)'
 
+        if temp_op.endswith(('is', 'si')):
+            self.supportBits = 'is'
+            temp_op = temp_op[:-2]
+        elif temp_op.endswith('i'):
+            self.supportBits = 'i'
+            temp_op = temp_op[:-1]
+        elif temp_op.endswith('s'):
+            self.supportBits = 's'
+            temp_op = temp_op[:-1]
+        else:
+            self.supportBits = 'na'
+            
+        self.opCode = temp_op
+        if self.opCode not in instructions:
+            self.response = f"-> Error: Syntax (invalid base OpCode '{self.opCode}')"
 
-class FullCode(Instruction):
+    def getSignedBinary(self, immediateValue: str, bits: int) -> str:
+        value = int(immediateValue)
+        if value >= 0:
+            return format(value, f'0{bits}b')
+        else:
+            return format((1 << bits) + value, f'0{bits}b')
 
-    assembly_list: list
-    code_list: list
-    full_code: str
-    response: str = '-> Success'
-
+class FullCode:
     def __init__(self, assembly_code_lines: list):
         self.assembly_list = assembly_code_lines
-        self.response = self.decode_full_code(self.assembly_list)
-    
-    def decode_full_code(self, assembly_list: str) -> str:
         self.code_list = []
+        self.full_code = ""
+        self.debug_output = ""
+        self.response = self.decode_full_code()
+
+    def decode_full_code(self):
+        all_lines_data = []
+        for row_index, row in enumerate(self.assembly_list):
+            line_instruction = Instruction(row)
+            if 'Error' in line_instruction.response:
+                return f"{line_instruction.response} in line {row_index + 1} ('{row.strip()}')"
+            
+            if 'Skipped' not in line_instruction.response:
+                all_lines_data.append((line_instruction.binary32_line, line_instruction.debug_line))
+
+        self.full_code = "".join([f"{data[0]}\n" for data in all_lines_data])
+        self.debug_output = "\n".join([f"{data[0]} -> {data[1]}" for data in all_lines_data])
         
-        for row_index, row in enumerate(assembly_list):
-            # print('Line begin. ', end='')
-            line = Instruction(row)
-            if 'Error' in line.response:
-                print(f'{line.response} in line {row_index+1}.')
-                self.response = line.response
-            else:
-                self.code_list.append(line.binary32_line+'\n')
-            # print('Line end.')
-        
-        # print(self.response)
-        if 'Error' in self.response:
-            return self.response
-        else:
-            self.full_code = ''.join(self.code_list)
-            return self.response
+        return '-> Success'
